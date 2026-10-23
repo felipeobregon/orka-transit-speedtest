@@ -30,6 +30,7 @@ jobs:
     steps:
       - name: Distance to the artifact storage
         run: |
+          echo "runner egress ip: $(curl -s --max-time 10 https://api.ipify.org)"
           curl -s --max-time 10 -o /dev/null \
             -w 'blob  connect=%{time_connect}s  ip=%{remote_ip}\n' \
             http://productionresultssa0.blob.core.windows.net/ || true
