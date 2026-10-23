@@ -1,0 +1,23 @@
+name: make-test-artifact
+
+# Creates a fixed-size random artifact in GitHub's artifact storage (Azure Blob)
+# so we can time downloads of it from inside an Orka cluster.
+# The artifact is durable; only its signed URL is short-lived, so a fresh URL
+# can be minted on demand without re-running this workflow.
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate 200 MB of random data
+        run: dd if=/dev/urandom of=200mb.bin bs=1M count=200
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedtest-200mb
+          path: 200mb.bin
+          retention-days: 1
+          compression-level: 0
