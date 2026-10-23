@@ -1,0 +1,68 @@
+name: Download Benchmark
+
+# Times a download of an existing artifact from a GitHub-hosted runner, which runs
+# inside Azure close to where artifacts are stored. This is the best-case number to
+# compare against the same measurements taken from an Orka cluster in Dublin.
+#
+# Measures three things against the same object: the real download-artifact action,
+# a single curl stream, and eight parallel curl streams.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id that produced the artifact
+        default: "39999632213"
+        required: true
+      artifact_id:
+        description: Artifact id to fetch directly
+        default: "12520863680"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Distance to the artifact storage
+        run: |
+          curl -s --max-time 10 -o /dev/null \
+            -w 'blob  connect=%{time_connect}s  ip=%{remote_ip}\n' \
+            http://productionresultssa0.blob.core.windows.net/ || true
+
+      - name: Curl the signed URL, single and parallel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ART: ${{ inputs.artifact_id }}
+        run: |
+          URL=$(curl -sI -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ART/zip" \
+            | awk 'tolower($1)=="location:"{print $2}' | tr -d '\r')
+          test -n "$URL" || { echo "no signed URL returned"; exit 1; }
+          for i in 1 2 3; do
+            curl -s --max-time 8 -o /dev/null \
+              -w "single run$i  %{speed_download} B/s  bytes=%{size_download}  connect=%{time_connect}s\n" "$URL"
+          done
+          ( for i in $(seq 8); do
+              curl -s --max-time 8 -o /dev/null -w '%{speed_download}\n' "$URL" &
+            done; wait ) | awk '{s+=$1} END {printf "multi8  %.0f B/s aggregate\n", s}'
+
+      - name: Mark start of the real action
+        run: echo "T0=$(date +%s%3N)" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: speedtest-200mb
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: dl
+
+      - name: Report the real action's throughput
+        run: |
+          MS=$(( $(date +%s%3N) - T0 ))
+          B=$(du -sb dl | cut -f1)
+          awk -v b="$B" -v ms="$MS" 'BEGIN {printf "download-artifact  %d bytes in %d ms = %.2f MB/s\n", b, ms, (b/(ms/1000))/1000000}'
